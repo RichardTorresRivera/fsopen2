@@ -1,10 +1,12 @@
 const express = require("express");
 const morgan = require("morgan");
+const cors = require("cors");
 
 const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cors());
 
 morgan.token("body", (req) => JSON.stringify(req.body));
 
@@ -20,7 +22,7 @@ app.use(
 );
 
 const urlBase = "/api/persons";
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 let persons = [
   {
