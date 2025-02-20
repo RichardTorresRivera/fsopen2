@@ -7,6 +7,7 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
+app.use(express.static("dist"));
 
 morgan.token("body", (req) => JSON.stringify(req.body));
 
@@ -106,6 +107,33 @@ app.post(urlBase, (request, response) => {
   persons = persons.concat(person);
 
   response.json(person);
+});
+
+app.put(`${urlBase}/:id`, (request, response) => {
+  const id = Number(request.params.id);
+  const body = request.body;
+
+  if (!body.name || !body.number) {
+    return response
+      .status(400)
+      .json({ error: "The name and/or number field is missing" });
+  }
+
+  const personIndex = persons.findIndex((person) => person.id === id);
+
+  if (personIndex === -1) {
+    return response.status(404).json({ error: "Person not found" });
+  }
+
+  const updatedPerson = {
+    ...persons[personIndex],
+    name: body.name,
+    number: body.number,
+  };
+
+  persons[personIndex] = updatedPerson;
+
+  response.json(updatedPerson);
 });
 
 app.delete(`${urlBase}/:id`, (request, response) => {
