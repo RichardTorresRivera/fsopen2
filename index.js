@@ -1,13 +1,15 @@
 const express = require("express");
 const morgan = require("morgan");
 const cors = require("cors");
+require("dotenv").config();
+const Person = require("./modules/person");
 
 const app = express();
 
+app.use(express.static("dist"));
+app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
-app.use(express.static("dist"));
 
 morgan.token("body", (req) => JSON.stringify(req.body));
 
@@ -22,34 +24,20 @@ app.use(
   )
 );
 
+const errorHandler = (error, request, response, next) => {
+  console.log(error.message);
+  if (error.name === "CastError") {
+    return response.status(400).send({ error: "malformatted id" });
+  }
+
+  next(error);
+};
+
 const urlBase = "/api/persons";
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 
-let persons = [
-  {
-    id: 1,
-    name: "Arto Hellas",
-    number: "040-123456",
-  },
-  {
-    id: 2,
-    name: "Ada Lovelace",
-    number: "39-44-5323523",
-  },
-  {
-    id: 3,
-    name: "Dan Abramov",
-    number: "12-43-234345",
-  },
-  {
-    id: 4,
-    name: "Mary Poppendieck",
-    number: "39-23-6423122",
-  },
-];
-
-const generateId = () => {
-  return Math.floor(Math.random() * (9999999 - 1) + 1);
+const unknowEndpoint = (request, response) => {
+  response.status(404).send({ error: "unknow endpoint" });
 };
 
 app.get("/", (request, response) => {
@@ -58,28 +46,40 @@ app.get("/", (request, response) => {
 
 app.get("/info", (request, response) => {
   const date = new Date();
-  const html = `
-  <p>Phonebook has info for ${persons.length} people</p>
-  <p>${date}</p>
-  `;
-  response.send(html);
+
+  Person.countDocuments({})
+    .then((count) => {
+      const html = `
+        <p>Phonebook has info for ${count} people</p>
+        <p>${date}</p>
+      `;
+      response.send(html);
+    })
+    .catch((error) => {
+      console.log("Error counting documents:", error.message);
+      response.status(500).send("Error retrieving data");
+    });
 });
 
 app.get(urlBase, (request, response) => {
-  response.json(persons);
+  Person.find({}).then((persons) => {
+    response.json(persons);
+  });
 });
 
-app.get(`${urlBase}/:id`, (request, response) => {
-  const id = Number(request.params.id);
-  const person = persons.find((person) => person.id === id);
-  if (person) {
-    response.json(person);
-  } else {
-    response.status(404).end();
-  }
+app.get(`${urlBase}/:id`, (request, response, next) => {
+  Person.findById(request.params.id)
+    .then((person) => {
+      if (person) {
+        response.json(person);
+      } else {
+        response.json(404).end();
+      }
+    })
+    .catch((error) => next(error));
 });
 
-app.post(urlBase, (request, response) => {
+app.post(urlBase, (request, response, next) => {
   const body = request.body;
 
   if (!body) {
@@ -92,25 +92,23 @@ app.post(urlBase, (request, response) => {
       .json({ error: "The name and/or number field is missing" });
   }
 
-  const existPerson = persons.find((person) => person.name === body.name);
+  Person.findOne({ name: body.name })
+    .then((existPerson) => {
+      if (existPerson)
+        return response.status(400).json({ error: "name must be unique" });
+      const person = new Person({
+        name: body.name,
+        number: body.number,
+      });
 
-  if (existPerson) {
-    return response.status(400).json({ error: "name must be unique" });
-  }
-
-  const person = {
-    name: body.name,
-    number: body.number,
-    id: generateId(),
-  };
-
-  persons = persons.concat(person);
-
-  response.json(person);
+      person.save().then((savedPerson) => {
+        response.json(savedPerson);
+      });
+    })
+    .catch((error) => next(error));
 });
 
-app.put(`${urlBase}/:id`, (request, response) => {
-  const id = Number(request.params.id);
+app.put(`${urlBase}/:id`, (request, response, next) => {
   const body = request.body;
 
   if (!body.name || !body.number) {
@@ -119,28 +117,30 @@ app.put(`${urlBase}/:id`, (request, response) => {
       .json({ error: "The name and/or number field is missing" });
   }
 
-  const personIndex = persons.findIndex((person) => person.id === id);
-
-  if (personIndex === -1) {
-    return response.status(404).json({ error: "Person not found" });
-  }
-
-  const updatedPerson = {
-    ...persons[personIndex],
+  const person = {
     name: body.name,
     number: body.number,
   };
 
-  persons[personIndex] = updatedPerson;
-
-  response.json(updatedPerson);
+  Person.findByIdAndUpdate(request.params.id, person, { new: true })
+    .then((updatedPerson) => {
+      response.json(updatedPerson);
+    })
+    .catch((error) => {
+      next(error);
+    });
 });
 
-app.delete(`${urlBase}/:id`, (request, response) => {
-  const id = Number(request.params.id);
-  persons = persons.filter((person) => person.id !== id);
-  response.status(204).end();
+app.delete(`${urlBase}/:id`, (request, response, next) => {
+  Person.findByIdAndDelete(request.params.id)
+    .then((result) => {
+      response.status(204).end();
+    })
+    .catch((error) => next(error));
 });
+
+app.use(unknowEndpoint);
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
